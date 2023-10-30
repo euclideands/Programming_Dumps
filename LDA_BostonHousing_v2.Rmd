@@ -1,0 +1,436 @@
+---
+Judul: "Studi Kasus Linear Discriminant Analysis" 
+Kelompok: 4 
+Anggota Kelompok:
+  - Nabhan Nabilah (4112321013)
+  - Tangkas Pangestu (4112321021)
+  - Indah Fitri Auliya (4112321031)
+---
+
+```{r}
+# Clear all variables
+rm(list = ls(all = TRUE))
+graphics.off()
+```
+
+# **Install & Import Packages**
+
+```{r}
+install.packages("readr")
+install.packages("HSAUR2")
+install.packages("MVA")
+# Data visualization
+install.packages("ggplot2")
+# LDA model
+install.packages("MASS")
+```
+
+```{r}
+library("readr")
+library("tools")
+library("HSAUR2")
+library("MVA")
+# Data visualization
+library("ggplot2")
+# LDA model
+library("MASS")
+```
+
+# **Load Dataset**
+
+```{r}
+url <- "https://raw.githubusercontent.com/QuantLet/MVA/master/QID-2298-MVAboxbhd/bostonh.dat"
+
+# Read the dataset from the URL and specify column names
+df <- read.table(url)
+
+# Rename the columns
+col_names <- c()
+for (i in 1:ncol(df)) {
+  col_names <- c(col_names, paste("x", i, sep = ""))
+}
+colnames(df) <- col_names
+
+# View the first few rows of the dataset
+head(df)
+```
+
+-   x1 : crim : per capita crime rate by town
+-   x2 : zn : proportion of residential land zoned for lots over 25,000 sq.ft
+-   x3 : indus : proportion of non-retail business acres per town
+-   x4 : chas : Charles River dummy variable (= 1 if tract bounds river; 0 otherwise)
+-   x5 : nox : nitric oxides concentration (parts per 10 million)
+-   x6 : rm : average number of rooms per dwelling
+-   x7 : age : proportion of owner-occupied units built prior to 1940
+-   x8 : dis : weighted distances to five Boston employment centres
+-   x9 : rad : index of accessibility to radial highways
+-   x10: tax : full-value property-tax rate per USD 10,000
+-   x11 : ptratio : pupil-teacher ratio by town
+-   x12 : b : $1000(B-0.63)^2$ where B is the proportion of blacks (African American) by town
+-   x13 : lstat : percentage of lower status of the population
+-   x14 : medv : median value of owner-occupied homes in USD 1000's
+
+# **Data Cleaning**
+
+```{r}
+# Check for null values in a dataframe
+null_values <- is.na(df)
+
+# Sum the null values in each column
+col_null_counts <- colSums(null_values)
+
+# Display the number of null values in each column
+print(col_null_counts)
+
+# # Remove rows with null values from the dataframe
+# df <- na.omit(df)
+```
+
+```{r}
+# Check for duplicates in the entire dataframe
+duplicates <- duplicated(df)
+
+# Display the rows with duplicate values
+print(df[duplicates, ])
+
+# # Remove duplicates and keep the first occurrence
+# df <- unique(df)
+```
+
+# **Preprocessing & EDA**
+
+## Distribusi Data
+
+```{r}
+# Path to output pdf
+pdf("D:/bostonhousing_distplot.pdf")
+
+# Set the number of rows and columns for the grid
+num_rows <- 4
+num_cols <- 4
+
+# Set the plot size
+# options(repr.plot.width = 10, repr.plot.height = 10)
+
+# Create a 4x3 grid of subplots
+par(mfrow = c(num_rows, num_cols))
+
+# Get all numeric columns from the data frame df
+numeric_columns <- df[, sapply(df, is.numeric)]
+
+# Loop through the numeric columns and create density plots with histograms
+for (i in 1:ncol(numeric_columns)) {
+  col_name <- names(numeric_columns)[i]
+  col_data <- numeric_columns[, i]
+
+  # Create the histogram
+  hist(col_data, col = "lightblue", border = "lightblue", prob = TRUE,
+  xlab = "Value", main = paste("Distplot for", col_name))
+
+  # Create the density plot
+  density_values <- density(col_data)
+  lines(density_values, col = "blue")
+}
+```
+
+Observasi:
+
+Terlihat bahwa sebagian besar variabel distribusinya negative skew atau left-skewed maka perlu dilakukan transformasi untuk membuat distribusinya menjadi normal. Berikut transformasi yang diusulkan:
+
+-   $x_1 = log(x_1)$
+-   $x_2 = \frac{x_2}{10}$
+-   $x_3 = log(x_3)$
+-   $x_5 = log(x_5)$
+-   $x_6 = log(x_6)$
+-   $x_7 = \frac{x{_{7}}^{2.5}}{10000}$
+-   $x_8 = log(x_8)$
+-   $x_9 = log(x_9)$
+-   $x_{10} = log(x_{10})$
+-   $x_{11} = \frac{{e}^{0.4.x_{11}}}{1000}$
+-   $x_{12} = \frac{x_{12}}{100}$
+-   $x_{13} = \sqrt{x_{13}}$
+-   $x_{14} = log(x_{14})$
+
+Sedangkan $x_4$ akan di-drop karena nilainya binary (kategorikal).
+
+```{r}
+transformed_df <- df
+
+# Perform transformations
+transformed_df[, 1] <- log(df[, 1])
+transformed_df[, 2] <- df[, 2] / 10
+transformed_df[, 3] <- log(df[, 3])
+transformed_df[, 5] <- log(df[, 5])
+transformed_df[, 6] <- log(df[, 6])
+transformed_df[, 7] <- (df[, 7] ^ (2.5)) / 10000
+transformed_df[, 8] <- log(df[, 8])
+transformed_df[, 9] <- log(df[, 9])
+transformed_df[, 10] <- log(df[, 10])
+transformed_df[, 11] <- exp(0.4 * df[, 11]) / 1000
+transformed_df[, 12] <- df[, 12] / 100
+transformed_df[, 13] <- sqrt(df[, 13])
+transformed_df[, 14] <- log(as.numeric(df[, 14]))
+```
+
+```{r}
+# Drop x4 from df
+df = transformed_df
+df <- df[, -4]
+head(df)
+```
+
+## Skala Data
+
+```{r}
+# Boxplot
+options(repr.plot.width = 10, repr.plot.height = 10)
+
+boxplot(transformed_df, at = 1:14, axes = FALSE, main = "Boston Housing data", cex.main = 1.5)
+
+for (i in 1:14) {
+    lines(c(i - 0.4, i + 0.4), c(mean(transformed_df[, i]), mean(transformed_df[, i])), col = "red3", lty = "dotted",
+        lwd = 1.2)
+}
+```
+
+Observasi:
+
+Variabel-variabel dalam data ini memiliki rentang (skala) yang berbeda-beda. Jika kita tidak menyesuaikan skala ini, maka dapat memengaruhi hasil model machine learning. Oleh karena itu, kita melakukan standardisasi menggunakan z-score (nilai z) untuk membuat semua variabel memiliki skala yang seragam. Ini membantu model machine learning bekerja lebih baik dengan data tersebut.
+
+```{r}
+# Standardization using z-score
+standardized_df <- scale(transformed_df)
+df <- scale(df)
+
+# Convert to data frame
+data <- as.data.frame(standardized_df)
+df <- as.data.frame(df)
+
+# transformed_df -> ada x4, sudah ditransformasi
+# df -> tidak ada x4, sudah ditansformasi & scaling
+# standardized_df -> ada x4, sudah ditransformasi & scaling
+```
+
+```{r}
+# Before-after scaling visualization
+par(mfrow = c(2, 1), ask = FALSE, cex = 0.5)
+
+boxplot(transformed_df, at = 1:14, axes = FALSE, main = "Boston Housing data before scaling", cex.main = 1.5)
+for (i in 1:14) {
+    lines(c(i - 0.4, i + 0.4), c(mean(transformed_df[, i]), mean(transformed_df[, i])), col = "red3", lty = "dotted",
+        lwd = 1.2)
+}
+
+boxplot(data, at = 1:14, axes = FALSE, main = "Boston Housing data after scaling", cex.main = 1.5)
+for (i in 1:14) {
+    lines(c(i - 0.4, i + 0.4), c(mean(data[, i]), mean(data[, i])), col = "red3", lty = "dotted",
+        lwd = 1.2)
+}
+```
+
+# Clustering
+
+```{r}
+d    = dist(df, "euclidean", p = 2)   # euclidean distance matrix
+w    = hclust(d, method = "ward.D")   # cluster analysis with ward algorithm
+tree = cutree(w, 2)
+
+t1   = subset(df, tree == 1)
+t2   = subset(df, tree == 2)
+```
+
+```{r}
+# Dendrogram for df after Ward algorithm
+plot(w, hang = -0.1, labels = FALSE, frame.plot = TRUE, ann = FALSE, cex.axis = 1.2)
+title(main = "Ward method", ylab = "distance", cex.lab = 1.2, cex.main = 1.6)
+```
+
+## Descriptive Statistics of Cluster 1 & Cluster 2
+
+```{r}
+# Count observations in each cluster
+cluster_counts <- table(tree)
+
+count_cluster_1 <- cluster_counts[1]
+count_cluster_2 <- cluster_counts[2]
+
+print(count_cluster_1)
+print(count_cluster_2)
+```
+
+```{r}
+# Means for Cluster 1 and Cluster 2
+mc = cbind(colMeans(subset(df, tree == "1")), colMeans(subset(df, tree == "2")))
+mc
+```
+
+```{r}
+# Standard deviations for Cluster 1 and Cluster 2
+sd_t1 <- sapply(t1[, 1:ncol(df)], sd)
+sd_t2 <- sapply(t2[, 1:ncol(df)], sd)
+
+# Combine standard deviations into a matrix
+sc <- cbind(sd_t1, sd_t2)
+sc
+```
+
+```{r}
+# Means and standard deviations of the 13 standardized variables for Cluster 1
+# (251 observations) and Cluster 2 (255 observations)
+tbl = cbind(mc[, 1], sc[, 1]/sqrt(nrow(t1)), mc[, 2], sc[, 2]/sqrt(nrow(t2)))
+tbl
+```
+
+## Factor Analysis
+
+```{r}
+# Convert to numeric matrix
+df <- as.matrix(df)
+
+# spectral decomposition
+eig = eigen(cov(df))
+eva = eig$values
+eve = eig$vectors[, 1:2]
+
+dav = df %*% eve
+
+# Update the 'tr' variable, not 'tree'
+tr = tree
+tr[tr == 1] = "red"
+tr[tr == 2] = "black"
+```
+
+```{r}
+# Scatterplot for the first two PCs displaying the two clusters
+dev.new()
+plot(dav[, 1], dav[, 2], pch = tree, col = tr, xlab = "PC1", ylab = "PC2", main = "first vs. second PC", 
+    cex.main = 1.8, cex.axis = 1.4, cex.lab = 1.4)
+```
+
+```{r}
+dat = standardized_df
+t3 = subset(dat, tree == 1)
+t4 = subset(dat, tree == 2)
+
+t = tree
+t[t == 1] = "red"
+t[t == 2] = "black"
+```
+
+```{r}
+dev.new()
+par(mfrow = c(2, 7), cex = 0.3)
+boxplot(t3[, 1], t4[, 1], border = c("red", "black"), xlab = "X1", cex.lab = 3, cex.axis = 3)
+boxplot(t3[, 2], t4[, 2], border = c("red", "black"), xlab = "X2", cex.lab = 3, cex.axis = 3)
+boxplot(t3[, 3], t4[, 3], border = c("red", "black"), xlab = "X3", cex.lab = 3, cex.axis = 3)
+boxplot(t3[, 4], t4[, 4], border = c("red", "black"), xlab = "X4", cex.lab = 3, cex.axis = 3)
+boxplot(t3[, 5], t4[, 5], border = c("red", "black"), xlab = "X5", cex.lab = 3, cex.axis = 3)
+boxplot(t3[, 6], t4[, 6], border = c("red", "black"), xlab = "X6", cex.lab = 3, cex.axis = 3)
+boxplot(t3[, 7], t4[, 7], border = c("red", "black"), xlab = "X7", cex.lab = 3, cex.axis = 3)
+boxplot(t3[, 8], t4[, 8], border = c("red", "black"), xlab = "X8", cex.lab = 3, cex.axis = 3)
+boxplot(t3[, 9], t4[, 9], border = c("red", "black"), xlab = "X9", cex.lab = 3, cex.axis = 3)
+boxplot(t3[, 10], t4[, 10], border = c("red", "black"), xlab = "X10", cex.lab = 3, 
+    cex.axis = 3)
+boxplot(t3[, 11], t4[, 11], border = c("red", "black"), xlab = "X11", cex.lab = 3, 
+    cex.axis = 3)
+boxplot(t3[, 12], t4[, 12], border = c("red", "black"), xlab = "X12", cex.lab = 3, 
+    cex.axis = 3)
+boxplot(t3[, 13], t4[, 13], border = c("red", "black"), xlab = "X13", cex.lab = 3, 
+    cex.axis = 3)
+boxplot(t3[, 14], t4[, 14], border = c("red", "black"), xlab = "X14", cex.lab = 3, 
+    cex.axis = 3)
+```
+
+```{r}
+# Scatterplot matrix for variables X1 to X7
+dev.new()
+pairs(transformed_df[, 1:7], col = tr, upper.panel = NULL, labels = c("X1", "X2", "X3", "X4", 
+    "X5", "X6", "X7"), cex.axis = 1.2)
+```
+
+```{r}
+# Scatterplot matrix for variables X8 to X14
+dev.new()
+pairs(transformed_df[, 8:14], col = tr, upper.panel = NULL, labels = c("X8", "X9", "X10", "X11", 
+    "X12", "X13", "X14"), cex.axis = 1.2) 
+```
+
+# Linear Discriminant Analysis
+
+```{r}
+m1  = colMeans(t1) # mean of first cluster
+m2  = colMeans(t2) # mean of second cluster
+m   = (m1 + m2)/2  # mean of both clusters
+# common variance matrix
+s = ((nrow(t1) - 1) * cov(t1) + (nrow(t2) - 1) * cov(t2)) / (nrow(transformed_df) - 2)    
+# alpha for the discrimination rule
+alpha = solve(s) %*% (m1 - m2)
+```
+
+```{r}
+t1 <- as.matrix(t1)
+t2 <- as.matrix(t2)
+
+# APER for clusters of Boston houses
+mis1  = sum((t1 - m) %*% alpha < 0)     # misclassified 1
+mis2  = sum((t2 - m) %*% alpha > 0)     # misclassified 2
+corr1 = sum((t1 - m) %*% alpha > 0)     # correct 1
+corr2 = sum((t2 - m) %*% alpha < 0)     # correct 2
+
+# APER (apparent error rate)
+aper  = (mis1 + mis2)/nrow(transformed_df)
+alph  = (df - matrix(m, nrow(df), ncol(df), byrow = T)) %*% alpha
+set.seed(1)
+```
+
+```{r}
+# discrimination scores
+p = cbind(alph, tree + 0.05 * rnorm(NROW(tree)))
+
+tree2 = tree
+tree2[tree2 == 1] = "red"
+tree2[tree2 == 2] = "black"
+```
+
+```{r}
+# plot of discrimination scores
+plot(p[, 1], p[, 2], pch = tree, col = tree2, xaxt = "n", yaxt = "n", xlab = "", ylab = "", 
+    bty = "n")
+abline(v = 0, lwd = 3) 
+title(paste("Discrimination scores"))
+```
+
+```{r}
+print(aper)
+```
+
+```{r}
+data = transformed_df
+n = nrow(data)
+
+# AER for clusters of Boston houses
+i     = 0
+mis1  = 0
+mis2  = 0
+corr1 = 0
+corr2 = 0
+while (i < n) {
+    i     = i + 1
+    xi    = subset(df, 1:n != i)
+    treei = subset(tree, 1:n != i)
+    t1    = subset(xi, treei == 1)
+    t2    = subset(xi, treei == 2)
+    m1    = colMeans(t1)                # mean of first cluster
+    m2    = colMeans(t2)                # mean of second cluster
+    m     = (m1 + m2)/2                 # mean of both clusters
+    s     = ((nrow(t1) - 1) * cov(t1) + (nrow(t2) - 1) * cov(t2))/(nrow(df) - 2)    # common variance matrix
+    alpha = solve(s) %*% (m1 - m2)                                                  # alpha for the discrimination rule
+    mis1  = mis1 + (tree[i] == 1) * ((df[i, ] - m) %*% alpha < 0)                   # misclassified 1
+    mis2  = mis2 + (tree[i] == 2) * ((df[i, ] - m) %*% alpha > 0)                   # misclassified 2
+    corr1 = corr1 + (tree[i] == 1) * ((df[i, ] - m) %*% alpha > 0)                  # correct 1
+    corr2 = corr2 + (tree[i] == 2) * ((df[i, ] - m) %*% alpha < 0)                  # correct 2
+}
+
+aer = (mis1 + mis2)/nrow(df)            # AER (actual error rate)
+print(aer) 
+```
